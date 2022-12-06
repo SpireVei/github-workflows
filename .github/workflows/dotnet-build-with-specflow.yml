@@ -1,0 +1,61 @@
+name: Dotnet build and test
+on:
+  workflow_call:
+    inputs:
+      PATH:
+        required: true
+        type: string
+      DLL:
+        required: true
+        type: string
+      SPECS_REPO:
+        required: true
+        type: string
+    secrets:
+      REPO_ACCESS_TOKEN:
+        required: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dotnet-version: ["6.0.x"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup .NET Core SDK ${{ matrix.dotnet-version }}
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }}
+
+      - name: Install dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --no-restore --verbosity normal
+
+      - name: Dotnet install SpecFlow.Plus.LivingDoc.CLI
+        if: github.ref == 'refs/heads/trunk' && github.event_name == 'push' && always()
+        run: dotnet tool install --global SpecFlow.Plus.LivingDoc.CLI
+
+      - name: Execute living doc test-assembly
+        if: github.ref == 'refs/heads/trunk' && github.event_name == 'push' && always()
+        run: livingdoc test-assembly ${{ inputs.PATH }}/${{ inputs.DLL }} -t ${{ inputs.PATH }}/TestExecution.json
+
+      - name: Publish specflow to ${{ inputs.SPECS_REPO }}
+        if: github.ref == 'refs/heads/trunk' && github.event_name == 'push' && always()
+        run: |
+          git clone https://.:${{ secrets.REPO_ACCESS_TOKEN }}@github.com/spirevei/${{ inputs.SPECS_REPO }}
+          cp ./LivingDoc.html ${{ inputs.SPECS_REPO }}
+          cd ${{ inputs.SPECS_REPO }}
+          mv LivingDoc.html index.html
+          git add .
+          git config --global user.email "<>"
+          git config --global user.name "spirevei-github-bot":wq
+          git diff-index --quiet HEAD || git commit -m "Automatic publish of specflow living doc"
+          git push
